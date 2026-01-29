@@ -142,8 +142,22 @@ def run_deepdili_pipeline(
     )
     meta_model.compile(optimizer=Adam(learning_rate=1e-3), loss='binary_crossentropy')
 
-    # In replication, we fit. In production, load best_model.h5
-    meta_model.fit(val_meta_s, y_val, epochs=50, verbose=0)
+    Returns
+    -------
+    Dict[str, Any]
+        Dictionary containing evaluation metrics and objects.
+    """
+    df, train_df, test_df = load_dataset(csv_path)
+    # Separate features and labels
+    # Filter out non-numeric columns (e.g., compound names) to avoid dtype errors
+    feature_df_train = train_df.drop(columns=['DILI_label', 'final_year'])
+    feature_df_test = test_df.drop(columns=['DILI_label', 'final_year'])
+    # Select only numeric columns
+    numeric_cols = feature_df_train.select_dtypes(include=[np.number]).columns.tolist()
+    X_train = feature_df_train[numeric_cols].values
+    y_train = train_df['DILI_label'].values
+    X_test = feature_df_test[numeric_cols].values
+    y_test = test_df['DILI_label'].values
 
     # 6. Prediction & evaluation
     final_probs = meta_model.predict(test_meta_s).flatten()
