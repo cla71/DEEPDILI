@@ -95,7 +95,9 @@ def run_v3_model(
         *cyp_cols,
         *available_cyp_flags,
     }
-    base_cols = [col for col in df.columns if col not in excluded_cols]
+    # Filter to numeric columns to avoid including strings when scaling
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    base_cols = [col for col in numeric_cols if col not in excluded_cols]
 
     # Prepare training and test sets
     X_train_base = train_df[base_cols].values

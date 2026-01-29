@@ -87,7 +87,12 @@ def run_v2_model(
         raise ValueError(f'Missing mechanistic columns: {missing_cols}')
 
     # Separate base descriptors and mechanistic features
-    feature_cols = [col for col in df.columns if col not in {'DILI_label', 'final_year', bsep_col, cyto_col, bsep_flag_col, cyto_flag_col}]
+    # Filter to numeric columns to avoid issues when scaling
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    feature_cols = [
+        col for col in numeric_cols
+        if col not in {'DILI_label', 'final_year', bsep_col, cyto_col, bsep_flag_col, cyto_flag_col}
+    ]
     mech_cols = [bsep_col, cyto_col, bsep_flag_col, cyto_flag_col]
 
     # Training sets
