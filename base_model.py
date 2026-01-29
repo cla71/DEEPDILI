@@ -224,9 +224,14 @@ def run_base_model(csv_path: str) -> Dict[str, Any]:
     """
     df, train_df, test_df = load_dataset(csv_path)
     # Separate features and labels
-    X_train = train_df.drop(columns=['DILI_label', 'final_year']).values
+    # Filter out non-numeric columns (e.g., compound names) to avoid dtype errors
+    feature_df_train = train_df.drop(columns=['DILI_label', 'final_year'])
+    feature_df_test = test_df.drop(columns=['DILI_label', 'final_year'])
+    # Select only numeric columns
+    numeric_cols = feature_df_train.select_dtypes(include=[np.number]).columns.tolist()
+    X_train = feature_df_train[numeric_cols].values
     y_train = train_df['DILI_label'].values
-    X_test = test_df.drop(columns=['DILI_label', 'final_year']).values
+    X_test = feature_df_test[numeric_cols].values
     y_test = test_df['DILI_label'].values
 
     # Scale features
