@@ -13,7 +13,7 @@ mechanistic assay data, CYP binding data) and update the file paths accordingly.
 
 | File | Description |
 | --- | --- |
-| `base_model.py` | Implements the base model with Mold2 descriptors, five base classifiers (KNN, random forest, SVM, XGBoost, extra trees), and a neural network meta-learner. Performs chronological splitting (pre-1997 vs. 1997+) and computes AUPRC, MCC, sensitivity, and specificity. |
+| `base_model.py` | Containerized DeepDILI Ting base model that mirrors the `Full_DeepDILI` notebook. It trains the base classifiers using `mold2_1002_full.csv`, applies the curated model subset, and runs the pretrained `best_model.h5` meta-learner. The script consumes an SDF that already contains Mold2 descriptor properties. |
 | `v2_model.py` | Extends the base model with mechanistic features (e.g., BSEP inhibition and human hepatocyte cytotoxicity). Mechanistic columns must be present in the input CSV. The script concatenates mechanistic features to the base-model probability vector and trains a larger meta-learner. |
 | `v3_model.py` | Extends V2 by adding CYP binding data for CYP3A4, CYP2D6, and CYP2C9, plus an interaction term between CYP binding and cytotoxicity. Optional binary flags can indicate imputed values. |
 
@@ -29,7 +29,7 @@ mechanistic assay data, CYP binding data) and update the file paths accordingly.
 3. **Run a model**:
 
 ```bash
-python base_model.py path/to/your_dataset.csv
+python base_model.py path/to/mold2_descriptors.sdf --output predictions.csv
 
 # or for V2
 python v2_model.py path/to/your_dataset_with_mechanistic.csv
