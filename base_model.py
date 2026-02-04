@@ -11,53 +11,6 @@ framework comparing two approaches:
 2. **DILIrank Model**: Uses RDKit molecular descriptors and fingerprints, trains
    new base classifiers and meta-learner on the DILIrank 2.0 dataset
 
-================================================================================
-USE CASE EXAMPLES
-================================================================================
-
-Example 1: Test compounds on Original DeepDILI (requires Mold2 descriptors)
------------------------------------------------------------------------------
-    # Step 1: Convert your CSV (with SMILES) to SDF
-    python base_model.py csv-to-sdf my_compounds.csv my_compounds.sdf \\
-        --smiles-col SMILES --id-col CompoundName
-
-    # Step 2: Generate Mold2 descriptors (external tool required)
-    # java -jar Mold2.jar -i my_compounds.sdf -o my_compounds_mold2.csv
-
-    # Step 3: Run DeepDILI predictions
-    python base_model.py predict-deepdili my_compounds_mold2.csv \\
-        -o deepdili_predictions.csv
-
-Example 2: Test compounds on DILIrank Model (RDKit-based, no external tools)
------------------------------------------------------------------------------
-    # Step 1: Generate molecular descriptors from CSV with SMILES
-    python base_model.py generate-descriptors my_compounds.csv \\
-        --smiles-col SMILES --id-col CompoundName \\
-        -o my_compounds_descriptors.csv
-
-    # Step 2: Run DILIrank model predictions
-    python base_model.py predict-dilirank my_compounds_descriptors.csv \\
-        -o dilirank_predictions.csv
-
-    # Or do both steps in one command:
-    python base_model.py predict-dilirank my_compounds.csv \\
-        --smiles-col SMILES -o dilirank_predictions.csv
-
-Example 3: Train a new DILIrank model
--------------------------------------
-    python base_model.py train-dilirank \\
-        --dilirank-file "Full_DeepDILI/DILIrank 2.0.xlsx" \\
-        --smiles-csv compound_smiles.csv \\
-        --output-dir models/dilirank/
-
-Example 4: Compare DeepDILI vs DILIrank on common compounds
------------------------------------------------------------
-    python base_model.py compare \\
-        --test-csv my_compounds.csv \\
-        --smiles-col SMILES \\
-        -o comparison_results.csv
-
-================================================================================
 """
 
 from __future__ import annotations
@@ -83,7 +36,10 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
 
 # RDKit imports
@@ -629,6 +585,12 @@ def _train_deepdili_base_classifiers(
     val_prob = _select_base_predictions(preds, selected_models, "val")
     test_prob = _select_base_predictions(preds, selected_models, "test")
 
+    val_prob = _select_base_classifiers(
+        pred_val_knn, pred_val_lr, pred_val_svm, pred_val_rf, pred_val_xgb, selected_models
+    )
+    test_prob = _select_base_classifiers(
+        pred_test_knn, pred_test_lr, pred_test_svm, pred_test_rf, pred_test_xgb, selected_models
+    )
     return val_prob, test_prob
 
 
@@ -1134,6 +1096,9 @@ def run_dilirank_prediction(
 
     return predictions
 
+    scaler = StandardScaler()
+    scaler.fit(val_prob.iloc[:, 1:])
+    test_prob_s = scaler.transform(test_prob.iloc[:, 1:])
 
 # =============================================================================
 # Model Comparison
@@ -1259,184 +1224,16 @@ def compare_models(
 
     return results
 
+    return results
 
-# =============================================================================
-# Command Line Interface
-# =============================================================================
 
-def main():
+def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(
         description="DeepDILI and DILIrank DILI Prediction Pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-================================================================================
-USE CASE EXAMPLES
-================================================================================
-
-1. Test on Original DeepDILI (requires Mold2 descriptors):
-   python base_model.py csv-to-sdf compounds.csv compounds.sdf --smiles-col SMILES
-   # Run external Mold2 tool to generate descriptors
-   python base_model.py predict-deepdili compounds_mold2.csv -o predictions.csv
-
-2. Test on DILIrank Model (RDKit-based):
-   python base_model.py generate-descriptors compounds.csv --smiles-col SMILES -o desc.csv
-   python base_model.py predict-dilirank desc.csv -o predictions.csv
-   # Or combined:
-   python base_model.py predict-dilirank compounds.csv --smiles-col SMILES -o preds.csv
-
-3. Train new DILIrank model:
-   python base_model.py train-dilirank --dilirank-file DILIrank.xlsx \\
-       --smiles-csv smiles_mapping.csv --output-dir models/my_model/
-
-4. Compare both models:
-   python base_model.py compare compounds.csv --smiles-col SMILES -o comparison.csv
-        """
-    )
-
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    # csv-to-sdf
-    p_sdf = subparsers.add_parser("csv-to-sdf",
-        help="Convert CSV with SMILES to SDF for Mold2")
-    p_sdf.add_argument("input_csv", help="Input CSV file")
-    p_sdf.add_argument("output_sdf", help="Output SDF file")
-    p_sdf.add_argument("--smiles-col", default="SMILES", help="SMILES column")
-    p_sdf.add_argument("--id-col", default="CompoundName", help="ID column")
-    p_sdf.add_argument("--label-col", help="Optional label column")
-
-    # generate-descriptors
-    p_desc = subparsers.add_parser("generate-descriptors",
-        help="Generate RDKit molecular descriptors from SMILES")
-    p_desc.add_argument("input_csv", help="Input CSV with SMILES")
-    p_desc.add_argument("--smiles-col", default="SMILES", help="SMILES column")
-    p_desc.add_argument("--id-col", default="CompoundName", help="ID column")
-    p_desc.add_argument("--descriptors", nargs="+",
-        default=["rdkit", "morgan", "maccs"],
-        choices=["rdkit", "morgan", "maccs"],
-        help="Descriptor types to generate")
-    p_desc.add_argument("-o", "--output", required=True, help="Output CSV")
-
-    # predict-deepdili
-    p_deepdili = subparsers.add_parser("predict-deepdili",
-        help="Run original DeepDILI predictions (requires Mold2 descriptors)")
-    p_deepdili.add_argument("test_data", help="CSV with Mold2 descriptors")
-    p_deepdili.add_argument("-o", "--output", help="Output CSV")
-
-    # predict-dilirank
-    p_dilirank = subparsers.add_parser("predict-dilirank",
-        help="Run DILIrank model predictions")
-    p_dilirank.add_argument("test_data", help="CSV with SMILES or descriptors")
-    p_dilirank.add_argument("--model-dir", help="Trained model directory")
-    p_dilirank.add_argument("--smiles-col", help="SMILES column (if auto-generating)")
-    p_dilirank.add_argument("--id-col", default="CompoundName", help="ID column")
-    p_dilirank.add_argument("-o", "--output", help="Output CSV")
-
-    # train-dilirank
-    p_train = subparsers.add_parser("train-dilirank",
-        help="Train new DILIrank model")
-    p_train.add_argument("--dilirank-file", default=str(DILIRANK_FILE),
-        help="Path to DILIrank Excel file")
-    p_train.add_argument("--smiles-csv", required=True,
-        help="CSV with CompoundName and SMILES columns")
-    p_train.add_argument("--output-dir", default=str(DILIRANK_MODEL_DIR),
-        help="Output directory for model")
-    p_train.add_argument("--descriptors", nargs="+",
-        default=["rdkit", "morgan", "maccs"],
-        choices=["rdkit", "morgan", "maccs"],
-        help="Descriptor types")
-    p_train.add_argument("--n-splits", type=int, default=5, help="CV folds")
-    p_train.add_argument("--n-repeats", type=int, default=10, help="CV repeats")
-
-    # compare
-    p_compare = subparsers.add_parser("compare",
-        help="Compare DeepDILI and DILIrank predictions")
-    p_compare.add_argument("test_csv", help="CSV with test compounds")
-    p_compare.add_argument("--smiles-col", default="SMILES", help="SMILES column")
-    p_compare.add_argument("--id-col", default="CompoundName", help="ID column")
-    p_compare.add_argument("--label-col", help="True label column (for evaluation)")
-    p_compare.add_argument("--mold2-csv", help="CSV with Mold2 descriptors")
-    p_compare.add_argument("-o", "--output", help="Output CSV")
-
-    # load-dilirank
-    p_load = subparsers.add_parser("load-dilirank",
-        help="Load and process DILIrank 2.0 dataset")
-    p_load.add_argument("dilirank_file", nargs="?", default=str(DILIRANK_FILE),
-        help="DILIrank Excel file")
-    p_load.add_argument("--smiles-csv", help="CSV with SMILES mapping")
-    p_load.add_argument("-o", "--output", help="Output CSV")
-
-    args = parser.parse_args()
-
-    # Execute commands
-    if args.command == "csv-to-sdf":
-        csv_to_sdf(
-            args.input_csv, args.output_sdf,
-            smiles_col=args.smiles_col,
-            id_col=args.id_col,
-            label_col=args.label_col
-        )
-
-    elif args.command == "generate-descriptors":
-        df = pd.read_csv(args.input_csv)
-        names = df[args.id_col].tolist() if args.id_col in df.columns else None
-        result = generate_descriptors(
-            df[args.smiles_col].tolist(),
-            compound_names=names,
-            descriptor_types=args.descriptors
-        )
-        result.to_csv(args.output, index=False)
-        print(f"Descriptors saved to {args.output}")
-
-    elif args.command == "predict-deepdili":
-        preds = run_deepdili_prediction(args.test_data, output_path=args.output)
-        if not args.output:
-            print(preds.to_string())
-
-    elif args.command == "predict-dilirank":
-        preds = run_dilirank_prediction(
-            args.test_data,
-            model_dir=args.model_dir,
-            smiles_col=args.smiles_col,
-            id_col=args.id_col,
-            output_path=args.output
-        )
-        if not args.output:
-            print(preds.to_string())
-
-    elif args.command == "train-dilirank":
-        config = DILIrankConfig(
-            descriptor_types=args.descriptors,
-            n_splits=args.n_splits,
-            n_repeats=args.n_repeats,
-        )
-        train_dilirank_model(
-            args.dilirank_file,
-            args.smiles_csv,
-            args.output_dir,
-            config=config
-        )
-
-    elif args.command == "compare":
-        compare_models(
-            args.test_csv,
-            smiles_col=args.smiles_col,
-            id_col=args.id_col,
-            label_col=args.label_col,
-            mold2_csv=args.mold2_csv,
-            output_path=args.output
-        )
-
-    elif args.command == "load-dilirank":
-        df = load_dilirank_dataset(args.dilirank_file, args.smiles_csv)
-        if args.output:
-            df.to_csv(args.output, index=False)
-            print(f"Saved {len(df)} compounds to {args.output}")
-            print(f"  DILI positive: {df['DILI_label'].sum()}")
-            print(f"  DILI negative: {(df['DILI_label'] == 0).sum()}")
-        else:
-            print(df.to_string())
 
 
 if __name__ == "__main__":
