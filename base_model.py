@@ -1233,7 +1233,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="DeepDILI and DILIrank DILI Prediction Pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=""
 
 
 if __name__ == "__main__":
