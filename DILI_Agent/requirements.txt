@@ -1,0 +1,31 @@
+# DILI Optimization Agent Requirements
+# =====================================
+
+# Core
+numpy>=1.21.0
+pandas>=1.3.0
+pyyaml>=6.0
+requests>=2.25.0
+
+# Jupyter
+jupyter>=1.0.0
+nbformat>=5.1.0
+ipykernel>=6.0.0
+
+# Machine Learning
+scikit-learn>=1.0.0
+xgboost>=1.5.0
+joblib>=1.0.0
+
+# Chemistry
+rdkit>=2022.03.1
+
+# Optional: Mordred descriptors
+# mordred>=1.2.0
+
+# Visualization
+matplotlib>=3.4.0
+seaborn>=0.11.0
+
+# For Ollama interaction
+# (requests already listed above)

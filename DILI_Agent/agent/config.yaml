@@ -1,0 +1,89 @@
+# DILI Optimization Agent Configuration
+# =====================================
+
+# Ollama Model Configuration
+models:
+  primary:
+    name: "qwen3.5:9b-q4"
+    endpoint: "http://localhost:11434"
+    temperature: 0.7
+    max_tokens: 4096
+    role: "planner"  # Main reasoning and planning
+
+  secondary:
+    name: "qwen3.5:4b"  # Smaller model for quick tasks
+    endpoint: "http://localhost:11434"
+    temperature: 0.5
+    max_tokens: 2048
+    role: "executor"  # Code generation, quick lookups
+
+# Agent Behavior
+agent:
+  max_iterations: 50
+  checkpoint_frequency: 5  # Save state every N iterations
+  verbose: true
+  auto_save: true
+
+  # Goal thresholds
+  targets:
+    mcc_threshold: 0.6  # Target MCC for model optimization
+    auc_threshold: 0.85
+    sensitivity_threshold: 0.7
+    specificity_threshold: 0.7
+
+# Paths (relative to DILI_Agent root)
+paths:
+  experiments: "experiments/"
+  models: "models/"
+  data: "data/"
+  state_file: "agent/state.json"
+  notebook: "experiments/dili_optimization.ipynb"
+
+# Skills Configuration
+skills:
+  data_finder:
+    enabled: true
+    sources:
+      - "pubchem"
+      - "chembl"
+      - "local"
+    cache_results: true
+
+  feature_engineer:
+    enabled: true
+    descriptor_types:
+      - "morgan_fp"
+      - "maccs_keys"
+      - "rdkit_2d"
+      - "mordred"
+    fingerprint_bits: 2048
+    fp_radius: 2
+
+  model_optimizer:
+    enabled: true
+    algorithms:
+      - "random_forest"
+      - "xgboost"
+      - "gradient_boosting"
+      - "svm"
+      - "mlp"
+      - "knn"
+      - "logistic_regression"
+    cv_folds: 5
+    cv_repeats: 3
+    scoring: "mcc"
+
+  notebook_writer:
+    enabled: true
+    auto_execute: false  # Safety: don't auto-run generated code
+
+  validator:
+    enabled: true
+    validation_split: 0.2
+    external_validation: true
+
+# Logging
+logging:
+  level: "INFO"
+  file: "agent/agent.log"
+  console: true
