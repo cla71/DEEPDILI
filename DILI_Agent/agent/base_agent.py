@@ -160,9 +160,11 @@ class OllamaClient:
         prompt: str,
         system: str = "",
         temperature: float = 0.7,
-        max_tokens: int = 4096
+        max_tokens: int = 4096,
+        timeout: int = 300,
+        max_retries: int = 3
     ) -> str:
-        """Generate text using Ollama API."""
+        """Generate text using Ollama API with retry logic."""
         url = f"{self.endpoint}/api/generate"
 
         payload = {
@@ -176,21 +178,32 @@ class OllamaClient:
             }
         }
 
-        try:
-            response = requests.post(url, json=payload, timeout=120)
-            response.raise_for_status()
-            return response.json().get("response", "")
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Ollama API error: {e}")
-            raise
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(url, json=payload, timeout=timeout)
+                response.raise_for_status()
+                return response.json().get("response", "")
+            except requests.exceptions.Timeout:
+                wait = 2 ** attempt
+                self.logger.warning(f"Ollama timeout (attempt {attempt+1}/{max_retries}), retrying in {wait}s...")
+                if attempt < max_retries - 1:
+                    time.sleep(wait)
+                else:
+                    self.logger.error("Ollama timed out after all retries")
+                    raise
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"Ollama API error: {e}")
+                raise
 
     def chat(
         self,
         model: str,
         messages: List[Dict[str, str]],
-        temperature: float = 0.7
+        temperature: float = 0.7,
+        timeout: int = 300,
+        max_retries: int = 3
     ) -> str:
-        """Chat completion using Ollama API."""
+        """Chat completion using Ollama API with retry logic."""
         url = f"{self.endpoint}/api/chat"
 
         payload = {
@@ -200,13 +213,22 @@ class OllamaClient:
             "options": {"temperature": temperature}
         }
 
-        try:
-            response = requests.post(url, json=payload, timeout=120)
-            response.raise_for_status()
-            return response.json().get("message", {}).get("content", "")
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Ollama chat error: {e}")
-            raise
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(url, json=payload, timeout=timeout)
+                response.raise_for_status()
+                return response.json().get("message", {}).get("content", "")
+            except requests.exceptions.Timeout:
+                wait = 2 ** attempt
+                self.logger.warning(f"Ollama chat timeout (attempt {attempt+1}/{max_retries}), retrying in {wait}s...")
+                if attempt < max_retries - 1:
+                    time.sleep(wait)
+                else:
+                    self.logger.error("Ollama chat timed out after all retries")
+                    raise
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"Ollama chat error: {e}")
+                raise
 
     def is_available(self) -> bool:
         """Check if Ollama server is running."""
@@ -248,7 +270,11 @@ class SkillRegistry:
         """Execute a skill by name."""
         skill = self.get(name)
         if skill is None:
-            raise ValueError(f"Skill not found: {name}")
+            available = list(self._skills.keys())
+            return {
+                "status": "error",
+                "message": f"Skill '{name}' not found. Available: {available}"
+            }
         return skill(**kwargs)
 
 
@@ -274,6 +300,9 @@ class DILIOptimizationAgent:
 
 Your goal: Achieve the best possible MCC score for DILI classification.
 
+CRITICAL: You must ONLY use skill names exactly as listed in the Available Skills section.
+Do NOT invent skill names. Use "none" as the action if no skill is appropriate yet.
+
 Available data types:
 - Molecular fingerprints (Morgan/ECFP, MACCS keys)
 - RDKit 2D descriptors
@@ -283,17 +312,18 @@ Available data types:
 - Mitochondrial toxicity data
 - Preclinical toxicity effects
 
-Available ML algorithms:
-- Random Forest, XGBoost, Gradient Boosting
-- SVM, Logistic Regression, KNN
-- MLP Neural Networks
-- Ensemble meta-learners
+Workflow order:
+1. Use find_local_data to discover available datasets
+2. Use load_dilirank to load the main dataset
+3. Use generate_fingerprints or generate_rdkit_descriptors to create features
+4. Use cross_validate or compare_models to evaluate models
+5. Use add_cell or add_experiment_section to write results to the notebook
 
-You must output your response as JSON with these fields:
+You must output ONLY a JSON object with no other text:
 {
     "observation": "What you learned from current state",
     "reasoning": "Your analysis and reasoning",
-    "action": "skill_name",
+    "action": "exact_skill_name_from_list",
     "parameters": {"key": "value"},
     "expected_outcome": "What you expect to happen"
 }
@@ -359,11 +389,13 @@ Available skills:
 
 What is your next action? Respond with JSON only."""
 
+        timeout = self.config.get('ollama', {}).get('timeout', 300)
         response = self.ollama.generate(
             model=model,
             prompt=prompt,
             system=self.SYSTEM_PROMPT,
-            temperature=self.config['models']['primary']['temperature']
+            temperature=self.config['models']['primary']['temperature'],
+            timeout=timeout
         )
 
         # Parse JSON from response

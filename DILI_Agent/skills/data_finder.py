@@ -197,6 +197,66 @@ def fetch_chembl(
     }
 
 
+@skills.register("load_data", "Auto-discover and load the best available DILI dataset")
+def load_data(
+    search_dir: str = None,
+    prefer: str = "dilirank"
+) -> Dict[str, Any]:
+    """
+    Alias skill: Auto-discover and load DILI data from standard locations.
+    Tries INPUTDATA, data/, and project root.
+
+    Args:
+        search_dir: Directory to search (default: auto-detect)
+        prefer: Preferred dataset type ('dilirank')
+
+    Returns:
+        Loaded dataset info
+    """
+    # Build search directories
+    agent_root = Path(__file__).parent.parent
+    project_root = agent_root.parent
+
+    search_dirs = []
+    if search_dir:
+        search_dirs.append(Path(search_dir))
+    search_dirs.extend([
+        project_root / "INPUTDATA",
+        project_root / "data",
+        agent_root / "data",
+        project_root,
+    ])
+
+    # Search for files
+    candidates = []
+    for d in search_dirs:
+        if d.exists():
+            found = find_local_data(str(d))
+            candidates.extend(found)
+
+    if not candidates:
+        return {
+            "status": "not_found",
+            "message": "No DILI datasets found in standard locations",
+            "searched": [str(d) for d in search_dirs]
+        }
+
+    # Prefer DILIrank file
+    dilirank_files = [f for f in candidates if 'dilirank' in f['name'].lower() or 'DILIrank' in f['name']]
+    chosen = dilirank_files[0] if dilirank_files else candidates[0]
+
+    # Try to load it
+    if chosen['type'] in ['.xlsx', '.xls', '.csv']:
+        return load_dilirank(chosen['path'])
+
+    return {
+        "status": "found",
+        "file": chosen['path'],
+        "message": f"Found {len(candidates)} dataset(s). Load manually with load_dilirank.",
+        "all_found": [f['path'] for f in candidates]
+    }
+
+
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================

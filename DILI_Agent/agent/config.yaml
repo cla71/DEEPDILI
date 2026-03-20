@@ -1,6 +1,11 @@
 # DILI Optimization Agent Configuration
 # =====================================
 
+# Ollama Settings
+ollama:
+  timeout: 300       # Seconds to wait for response (qwen3.5:9b-q4 needs ~2min on first call)
+  max_retries: 3     # Retry on timeout (exponential backoff: 2s, 4s, 8s)
+
 # Ollama Model Configuration
 models:
   primary:
