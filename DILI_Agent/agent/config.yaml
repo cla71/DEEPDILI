@@ -3,8 +3,11 @@
 
 # Ollama Settings
 ollama:
-  timeout: 300       # Seconds to wait for response (qwen3.5:9b-q4 needs ~2min on first call)
-  max_retries: 3     # Retry on timeout (exponential backoff: 2s, 4s, 8s)
+  timeout: 300           # Seconds to wait for response (qwen3.5:9b-q4 needs ~2min on first call)
+  max_retries: 3         # Retry on timeout (exponential backoff: 2s, 4s, 8s)
+  recovery_timeout: 120  # Max seconds to wait for ollama recovery after crash
+  health_check_timeout: 10  # Timeout for health check pings
+  warmup: true           # Warm up models at startup to avoid cold-load timeouts
 
 # Ollama Model Configuration
 models:
