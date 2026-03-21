@@ -186,13 +186,17 @@ class OllamaClient:
             except requests.exceptions.Timeout:
                 wait = 2 ** attempt
                 self.logger.warning(f"Ollama timeout (attempt {attempt+1}/{max_retries}), retrying in {wait}s...")
-                if attempt < max_retries - 1:
-                    time.sleep(wait)
-                else:
-                    self.logger.error("Ollama timed out after all retries")
-                    raise
+            except requests.exceptions.ConnectionError:
+                wait = 5 * (2 ** attempt)
+                self.logger.warning(f"Ollama connection lost (attempt {attempt+1}/{max_retries}), retrying in {wait}s...")
             except requests.exceptions.RequestException as e:
-                self.logger.error(f"Ollama API error: {e}")
+                self.logger.error(f"Ollama API error (non-retryable): {e}")
+                raise
+
+            if attempt < max_retries - 1:
+                time.sleep(wait)
+            else:
+                self.logger.error(f"Ollama generate failed after {max_retries} attempts")
                 raise
 
     def chat(
@@ -221,22 +225,39 @@ class OllamaClient:
             except requests.exceptions.Timeout:
                 wait = 2 ** attempt
                 self.logger.warning(f"Ollama chat timeout (attempt {attempt+1}/{max_retries}), retrying in {wait}s...")
-                if attempt < max_retries - 1:
-                    time.sleep(wait)
-                else:
-                    self.logger.error("Ollama chat timed out after all retries")
-                    raise
+            except requests.exceptions.ConnectionError:
+                wait = 5 * (2 ** attempt)
+                self.logger.warning(f"Ollama chat connection lost (attempt {attempt+1}/{max_retries}), retrying in {wait}s...")
             except requests.exceptions.RequestException as e:
-                self.logger.error(f"Ollama chat error: {e}")
+                self.logger.error(f"Ollama chat error (non-retryable): {e}")
                 raise
 
-    def is_available(self) -> bool:
+            if attempt < max_retries - 1:
+                time.sleep(wait)
+            else:
+                self.logger.error(f"Ollama chat failed after {max_retries} attempts")
+                raise
+
+    def is_available(self, timeout: int = 10) -> bool:
         """Check if Ollama server is running."""
         try:
-            response = requests.get(f"{self.endpoint}/api/tags", timeout=5)
+            response = requests.get(f"{self.endpoint}/api/tags", timeout=timeout)
             return response.status_code == 200
-        except:
+        except requests.exceptions.RequestException:
             return False
+
+    def wait_for_ollama(self, max_wait: int = 120, check_interval: int = 5) -> bool:
+        """Block until Ollama is available or max_wait seconds elapse."""
+        elapsed = 0
+        while elapsed < max_wait:
+            if self.is_available():
+                self.logger.info(f"Ollama available after {elapsed}s")
+                return True
+            self.logger.warning(f"Ollama unavailable, waiting... ({elapsed}/{max_wait}s)")
+            time.sleep(check_interval)
+            elapsed += check_interval
+        self.logger.error(f"Ollama did not recover within {max_wait}s")
+        return False
 
 
 # ============================================================================
@@ -553,11 +574,36 @@ Max iterations: {self.config['agent']['max_iterations']}
 
         # Check Ollama availability
         if not self.ollama.is_available():
-            self.logger.error("Ollama server not available. Please start Ollama.")
-            return
+            self.logger.error("Ollama server not available. Waiting for startup...")
+            recovery_timeout = self.config.get('ollama', {}).get('recovery_timeout', 120)
+            if not self.ollama.wait_for_ollama(max_wait=recovery_timeout):
+                self.logger.error("Ollama not available. Please start Ollama.")
+                return
+
+        # Warm up models to avoid cold-load timeouts
+        if self.config.get('ollama', {}).get('warmup', True):
+            self.logger.info("Warming up models...")
+            for model_key in ['primary', 'secondary']:
+                model_name = self.config['models'][model_key]['name']
+                try:
+                    self.ollama.generate(model=model_name, prompt="Hello", max_tokens=1, timeout=180)
+                    self.logger.info(f"Model {model_name} ready")
+                except Exception as e:
+                    self.logger.warning(f"Model {model_name} warm-up failed: {e}")
+
+        ollama_retries = 0
+        max_ollama_retries = 3
 
         while self.state.iteration < max_iterations:
             try:
+                # Pre-iteration health check
+                if not self.ollama.is_available():
+                    self.logger.warning("Ollama not available at start of iteration. Waiting...")
+                    recovery_timeout = self.config.get('ollama', {}).get('recovery_timeout', 120)
+                    if not self.ollama.wait_for_ollama(max_wait=recovery_timeout):
+                        self.logger.error("Ollama unavailable. Stopping agent.")
+                        break
+
                 # OBSERVE
                 observations = self.observe()
 
@@ -577,6 +623,7 @@ Max iterations: {self.config['agent']['max_iterations']}
 
                 # ITERATE
                 self.iterate()
+                ollama_retries = 0  # Reset retry counter on successful iteration
 
                 # Small delay to prevent overwhelming the system
                 time.sleep(0.5)
@@ -584,8 +631,34 @@ Max iterations: {self.config['agent']['max_iterations']}
             except KeyboardInterrupt:
                 self.logger.info("Agent interrupted by user")
                 break
+            except requests.exceptions.ConnectionError:
+                ollama_retries += 1
+                self.logger.warning(f"Ollama connection lost during iteration (retry {ollama_retries}/{max_ollama_retries})")
+                self.state.save()
+                if ollama_retries >= max_ollama_retries:
+                    self.logger.error("Max ollama retries reached. Stopping agent.")
+                    self.state.errors.append("Ollama crashed repeatedly, agent stopped")
+                    break
+                recovery_timeout = self.config.get('ollama', {}).get('recovery_timeout', 120)
+                if self.ollama.wait_for_ollama(max_wait=recovery_timeout):
+                    self.logger.info("Ollama recovered. Retrying current iteration.")
+                    continue  # Retry same iteration
+                else:
+                    self.logger.error("Ollama did not recover. Stopping agent.")
+                    break
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"Ollama request error: {e}")
+                self.state.errors.append(str(e))
+                self.state.save()
+                recovery_timeout = self.config.get('ollama', {}).get('recovery_timeout', 60)
+                if self.ollama.wait_for_ollama(max_wait=recovery_timeout):
+                    self.logger.info("Ollama available again. Retrying iteration.")
+                    continue
+                else:
+                    self.logger.error("Ollama unavailable. Stopping.")
+                    break
             except Exception as e:
-                self.logger.error(f"Agent error: {e}")
+                self.logger.error(f"Agent error (non-ollama): {e}")
                 self.state.errors.append(str(e))
                 self.state.iteration += 1
 
